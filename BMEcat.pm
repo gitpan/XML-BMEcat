@@ -1,9 +1,9 @@
 #!/usr/bin/perl
 
-use strict vars;
+use strict 'vars';
 use vars qw/ $VERSION /;
 
-$VERSION=0.52;
+$VERSION=0.55;
 
 #----*----*----*----*----*----*----*----*----*----*----*----*----*----*----*
 package XML::BMEcat;
@@ -52,10 +52,21 @@ sub creatGroupSystem {
 }
 
 
-sub creatArticleSystem {
+sub getGroupSystem {
    my $self = shift;
 
-   return $self->{'ART_MAP'} = ArticleSystem->new();
+   ($self->{'NODE_LIST'}) ? return $self->{'NODE_LIST'} : 0;
+}
+
+
+sub creatArticleSystem {
+   my $self = shift;
+   
+   $self->{'ART_MAP'} = ArticleSystem->new();
+   
+   $self->{'ART_MAP'}->bind2GroupSystem($self->getGroupSystem);
+   
+   return $self->{'ART_MAP'}
 }
 
 
@@ -87,7 +98,7 @@ sub writeHeader {
    $self->{'XMLFILE'}->print(
       '<?xml version="1.0" encoding="' .      $INFO->{'Config'}->{'CHAR_SET'} . "\"?>\n\n",
       '<!DOCTYPE BMECAT SYSTEM "' .           $INFO->{'Config'}->{'DTD'} . "\">\n\n",
-      '<BMECAT version="1.01">' . "\n" .
+      '<BMECAT version="' . ($INFO->{'Config'}->{'VERSION'} ? $INFO->{'Config'}->{'VERSION'} : '1.2') . '">' . "\n" .
       CreateTAGf (1, "HEADER", "\n",
          CreateTAGf (2, "GENERATOR_INFO",     $INFO->{'General'}->{'GENERATOR_INFO'}),
          CreateTAGf (2, "CATALOG", "\n", 
@@ -99,6 +110,7 @@ sub writeHeader {
                CreateTAGf (4, "DATE",         $INFO->{'General'}->{'DATE'}),
                CreateTAGf (4, "TIME",         $INFO->{'General'}->{'TIME'}), "         ",
             ),
+            CreateTAGf (3, "TERRITORY",       $INFO->{'General'}->{'TERRITORY'}),
             CreateTAGf (3, "CURRENCY",        $INFO->{'General'}->{'CURRENCY'}),
             CreateTAGf (3, "MIME_ROOT",       $INFO->{'General'}->{'MIME_ROOT'}), "      "
          ),
@@ -208,7 +220,7 @@ sub writeGroupSystem {
    ( $self->{'NODE_LIST'} ) ? my $NODE_LIST = $self->{'NODE_LIST'} : return -1;
    ( $self->{'INFO'} )      ? my $INFO = $self->{'INFO'}           : return -1;
 
-   my $type;
+   my ($type, %ReverseIdx);
 
    print "... Creating BME-Catalog-Structure ...\n" if $self->{'INFO'}->{'Config'}->{'VERBOSE'};
 
@@ -217,8 +229,13 @@ sub writeGroupSystem {
          CreateTAGf (3, "GROUP_SYSTEM_ID", $INFO->{'Config'}->{'GROUP_SYSTEM_ID'})
       );
 
-   foreach my $group_id ( sort keys( %$NODE_LIST ) ) {
+   foreach (keys %$NODE_LIST) { $ReverseIdx{$NODE_LIST->{$_}} = $_ }
 
+   foreach (@$NODE_LIST) {
+   	
+      next unless $ReverseIdx{$_};                         # because the Pseudohash !
+      my $group_id = $ReverseIdx{$_};
+   
       my $desc;
 
       if ( ! $NODE_LIST->{$group_id}->{'PARENT'} ) {       # no parents :-(, root ?
@@ -290,13 +307,13 @@ sub writeArticleSystem {
 
    foreach my $IDX (sort keys ( %$ART_MAP )) {
 
-      next unless $IDX;
+      next if $IDX =~ /^#~_/ or ! $IDX;
 
       my $str = "";
 
       $str .= $ret if $ret = ArticleDetails($ART_MAP->{$IDX}, 'ARTICLE_DETAILS');
 
-      if ( $self->{'FEATURE_GROUP_LIST'} ) {
+      if ( $self->{'FEATURE_GROUP_LIST'} and $ART_MAP->{$IDX}->{FT_GROUP} ) {
            $str .= $ret if $ret = ArticleFeatures( $ART_MAP->{$IDX},
                                                    $self->{'FEATURE_GROUP_LIST'},
 						   $self->{'INFO'}->{'Config'}->{'FEATURE_SYSTEM_NAME'}
@@ -372,6 +389,8 @@ sub ArticleFeatures {
    my $FEATURE_GROUP_LIST = shift;
    my $str1  = CreateTAGf (4, 'REFERENCE_FEATURE_SYSTEM_NAME', shift);
 
+#   unless ($ref->{'FT_GROUP'}) { printf "Skipping ArticleFeatures for: %s\n", $ref->{'SUPPLIER_AID'}; return ""};
+
    $str1 .= CreateTAGf (4, 'REFERENCE_FEATURE_GROUP_ID', $ref->{'FT_GROUP'});
 
    foreach ( @{$FEATURE_GROUP_LIST->{$ref->{'FT_GROUP'}}} ) {
@@ -404,6 +423,8 @@ sub writeArticleGroupMap {
 
    foreach my $IDX (keys %$ART_MAP) {
 
+      next if $IDX =~ /^#~_/ or ! $IDX;
+      
       if ( @{$ART_MAP->{$IDX}->{'ARTICLE_DETAILS'}}[2] ) {             # EAN exists ?
 
             $art_id = $ART_MAP->{$IDX}->{'ARTICLE_DETAILS'}->[2]->[1];
@@ -451,17 +472,19 @@ sub MIME_INFO {
 
    foreach ( @{$REF} ) {
 
-      my ($mtype, $msource, $purpose) = @{$_};
+      my ($mtype, $msource, $description, $purpose) = @{$_};
 
       $mime .= CreateTAGf ($indent + 1, "MIME", "\n",
 
-               CreateTAGf ($indent + 2, "MIME_TYPE", $mtype),
+               CreateTAGf ($indent + 2, "MIME_TYPE",    $mtype),
 
-               CreateTAGf ($indent + 2, "MIME_SOURCE", $msource),
+               CreateTAGf ($indent + 2, "MIME_SOURCE",  $msource),
+               
+               CreateTAGf ($indent + 2, "MIME_DESCR",   $description),
 
                CreateTAGf ($indent + 2, "MIME_PURPOSE", $purpose),
 
-               CreateTAGf ($indent + 2, "MIME_ORDER", $morder++), 
+               CreateTAGf ($indent + 2, "MIME_ORDER",   $morder++), 
                substr "                                    ", 0, 3*($indent+1)
               )
    }
@@ -470,14 +493,15 @@ sub MIME_INFO {
                       substr "                              ", 0, 3*$indent);
 }
 
+my $xmlgen;
 
 sub CreateTAGf {
    my ($indent, $TAG, @rest) = @_;
 
-   my $xml = new XML::Generator or die $!;
+   my $xmlgen = new XML::Generator or die $! unless defined $xmlgen;
 
    map {
-           s/&([^amp])/&amp;\1/g;
+           s/&([^amp])/&amp;$1/g;
 
 #           s/</&lt;/g;
 
@@ -489,7 +513,7 @@ sub CreateTAGf {
 
    my $Spaces = substr "                              ", 0, 3*$indent;
 
-   return ($Spaces . $xml->$TAG(@rest) . "\n");
+   return ($Spaces . $xmlgen->$TAG(@rest) . "\n");
 }
 
 
@@ -581,6 +605,8 @@ sub addFeatureGroup {
 
    my $key  = shift;
 
+   return "" if exists $self->{$key};
+
    $self->{$key} = [];
 
    while (my ($tag, $val) = splice @_, 0, 2) {
@@ -598,7 +624,7 @@ package GroupSystem;
 sub new {
    my $class  = shift;
 
-   my $self = {};
+   my $self = [{}];
 
    bless $self, $class;
 }
@@ -607,14 +633,32 @@ sub new {
 sub creatCatalogGroup {
    my ($self, $key) = @_;
 
-   return $self->{$key} = CatalogGroup->new();
+# pls.don't forget this problem
+  (exists $self->{$key}) ? return $self->{$key} :
+				   return Push2PsH($self, $key, CatalogGroup->new());
+}
+
+
+sub Push2PsH {
+   my ($struct, $key, $val) = @_;
+   
+   $struct->[0]->{$key} = @$struct;
+   push @$struct, $val;	
+   return $val;
 }
 
 
 sub getCatalogGroup {
    my ($self, $key) = @_;
 
-   return $self->{$key};
+    if (exists $self->{$key}) {
+    	
+    	return $self->{$key}
+    	
+    } else {
+    	
+        return 0
+    }
 }
 
 
@@ -625,7 +669,8 @@ sub new {
    my $class  = shift;
 
    my $self = {};
-
+   $self->{'MEMBERS'} = [];
+   
    bless $self, $class;
 }
 
@@ -637,6 +682,15 @@ sub setData {
 
 	$self->{$tag} = "$val";
    }
+}
+
+
+sub getData {
+   my $self = shift;
+
+   my $Key  = shift;
+   
+   return $self->{$Key} if exists $self->{$Key};
 }
 
 
@@ -656,11 +710,25 @@ sub addMime {
 }
 
 
+sub addMember {
+   my $self = shift;
+   
+   push @{$self->{'MEMBERS'}}, shift;
+}
+
+
+sub getMembers {
+   my $self = shift;
+   
+   return $self->{'MEMBERS'};
+}
+
+
 #----*----*----*----*----*----*----*----*----*----*----*----*----*----*----*
 package ArticleSystem;
 
 sub new {
-   my $class  = shift;
+   my $class = shift;
 
    my $self = {};
 
@@ -668,12 +736,26 @@ sub new {
 }
 
 
+sub bind2GroupSystem {
+   my $self = shift;
+
+   $self->{'#~_GROUP_SYSTEM'} = shift;
+}
+
+
+sub getGroupSystem {
+   my $self = shift;
+
+   return $self->{'#~_GROUP_SYSTEM'} if exists $self->{'#~_GROUP_SYSTEM'};
+}
+
+
 sub creatArticle {
    my $self = shift;
 
-   my $key = shift;
-
-   return $self->{$key} = Article->new();
+   my $key = shift; 
+   
+   return $self->{$key} = Article->new($key, $self->getGroupSystem);
 }
 
 
@@ -688,11 +770,22 @@ sub getArticel {
 package Article;
 
 sub new {
-   my $class  = shift;
+   my ($class, $Key, $GroupSystem)  = @_;
 
    my $self = {};
 
+   $self->{'ART_KEY'} = $Key;
+
+   $self->{'#~_GROUP_SYSTEM'} = $GroupSystem if $GroupSystem;
+   
    bless $self, $class;
+}
+
+
+sub getKey {
+   my $self = shift;
+
+   return $self->{'ART_KEY'} if exists $self->{'ART_KEY'};
 }
 
 
@@ -709,7 +802,7 @@ sub setMainInfo {
 sub setFeatureGroup {
    my $self = shift;
 
-   $self->{'FT_GROUP'} = shift;
+   $self->{'FT_GROUP'} = shift if $_[0];
 }
 
 
@@ -736,7 +829,7 @@ sub setDetails {
 
    my $idx = {	'DESCRIPTION_SHORT'	  =>  0,	'DESCRIPTION_LONG'	=>  1,
 		'EAN'			  =>  2,	'SUPPLIER_ALT_AID'	=>  3,
-		'BUYER_ID'		  =>  4,	'MANUFACTURER_AID'	=>  5,
+		'BUYER_AID'		  =>  4,	'MANUFACTURER_AID'	=>  5,
 		'MANUFACTURER_NAME'	  =>  6,	'ERP_GROUP_BUYER'	=>  7,
 		'ERP_GROUP_SUPPLIER'	  =>  8,	'DELIVERY_TIME'		=>  9,
 		'SPECIAL_TREATMENT_CLASS' => 10,	'KEYWORD'		=> 11,
@@ -822,9 +915,23 @@ sub addPrice {
 
 
 sub map2Group {
-   my $self = shift;
+   my ($self, $GroupKey) = @_;
 
-   push @{$self->{PARENTS}}, shift;
+   push @{$self->{PARENTS}}, $GroupKey;
+
+   my $CatalogGroup = "";
+
+   $CatalogGroup = $self->{'#~_GROUP_SYSTEM'}->getCatalogGroup($GroupKey)
+      if exists $self->{'#~_GROUP_SYSTEM'};
+         
+   if ($CatalogGroup) {
+   	
+	$CatalogGroup->addMember($self->getKey);
+	
+   } else {
+   	
+	print "No Groupssystem or Cataloggroup: $GroupKey\n";
+   }
 }
 
 
@@ -929,6 +1036,7 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 =item * setConfigInfo
 
   $Header->setConfigInfo(
+			'VERSION'               => $BMEcat_VERSION,
 			'CHAR_SET'              => $CHAR_SET,
                         'DTD'		        => $DTD,
 			'VERBOSE'		=> 1
@@ -1022,19 +1130,31 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 			  'SORT'	=>	5,
 			  'LEAF'	=>      1 );
 
+=item * getData
+
+  $CatalogGroup->getData('PARENT');
+
 =item * addDescription
 
   $CatalogGroup->addDescription($Description08);
 
 =item * addMime
 
-  $CatalogGroup->addMime($type, $source, $purpose);
+  $CatalogGroup->addMime($type, $source, $description, $purpose);
 
   $CatalogGroup = $GroupSystem->creatCatalogGroup('10');
   $CatalogGroup->setData( 'PARENT'	=>	4,
 			  'NAME'	=>	$name10,
 			  'SORT'	=>	10,
 			  'LEAF'	=>      1 );
+
+=item * addMember
+
+  $CatalogGroup->addMember('foo');
+
+=item * getMembers
+
+  my @members = $CatalogGroup->getMembers;
 
 =item * writeGroupSystem
 
@@ -1059,6 +1179,10 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 
   $BMEcat->writeArticleSystem();
 
+=item * getGroupSystem
+
+  my $GroupSystem = ArticleSystem->getGroupSystem();
+
 =item * creatArticle
 
   my $Article = $ArticleSystem->creatArticle($index);
@@ -1066,6 +1190,10 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 =item * getArticel
 
   my $Article = $ArticleSystem->getArticle($index);
+
+=item * getKey
+
+  my $ArticleKey = $Article->getKey;
 
 =item * setMainInfo
 
@@ -1106,6 +1234,7 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
   $Article->addMime(
 		$mime_type, 
 		$mime_source,
+		$description,
 		$mime_purpose
 	);
 
@@ -1207,7 +1336,7 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 
 =head1 LIMITATIONS
 
-  Not all BMEcat-features have been implemented yet.
+  Not all BMEcat-features (eg. CLASSIFICATION_SYSTEM) have been implemented yet.
   See method-descriptions for detailed informations.
 
 
@@ -1237,8 +1366,10 @@ XML::BMEcat - Perl extension for generating BMEcat-XML
 
 =head1 COPYRIGHT
 
-  Copyright 2000  by Frank-Peter Reich (fp$), fpreich@cpan.org
+  Copyright 2000-2003  by Frank-Peter Reich (fp$), fpreich@cpan.org
  
   This library is free software; you can redistribute it and/or modify it under
   the same terms as Perl itself.
  
+  BMEcat is a trademark of BME - Bundesverband Materialwirtschaft, Einkauf und Logistik e.V.
+

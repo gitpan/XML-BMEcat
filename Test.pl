@@ -32,7 +32,7 @@ $Header->setBuyerInfo(
          		'STREET'		=> "Business Street 17",
          		'ZIP'			=> 01234,
          		'CITY'			=> 'New York',
-         		'COUNTRY'			=> 'USA',
+         		'COUNTRY'		=> 'USA',
          		'EMAIL'			=> "info\@foo-bussines.com",
          		'URL'			=> "http://www.foo-bussines.com"
 		   );
@@ -59,10 +59,11 @@ $Header->setSupplierInfo(
          		'URL'			=> "http://www.fischerwerke.com"
 		   );
 
-$Header->setConfigInfo( 'FEATURE_SYSTEM_NAME'	=>	'ECLASS',
-			'VERBOSE'		=>	0,
-			'CHAR_SET'		=>	'ISO-8859-1',
-			'DTD'			=>	'bmecat_new_catalog.dtd'
+$Header->setConfigInfo( 'VERSION'               => '1.2',
+			'FEATURE_SYSTEM_NAME'	=> 'ECLASS-4.0',
+			'VERBOSE'		=> 0,
+			'CHAR_SET'		=> 'ISO-8859-1',
+			'DTD'			=> 'bmecat_new_catalog.dtd'
 		   );
 
 $BMEcat->writeHeader();
@@ -177,4 +178,3 @@ $BMEcat->writeArticleGroupMap();
 
 
 $BMEcat->writeTail();
-
